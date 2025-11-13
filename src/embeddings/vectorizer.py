@@ -1,11 +1,12 @@
-"""Create vector embeddings from chef transcripts."""
+"""Create vector embeddings from chef transcripts using open-source models."""
 
-from typing import List, Dict, Any
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
-from tqdm import tqdm
 import os
+from typing import List, Dict, Any
+from sentence_transformers import SentenceTransformer
+import chromadb
+from chromadb.config import Settings
+from tqdm import tqdm
+import numpy as np
 
 
 class ChefVectorizer:
@@ -13,7 +14,7 @@ class ChefVectorizer:
 
     def __init__(
         self,
-        embedding_model: str = "text-embedding-3-large",
+        embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
         vector_db_path: str = "./data/vector_db"
@@ -22,25 +23,24 @@ class ChefVectorizer:
         Initialize vectorizer.
 
         Args:
-            embedding_model: OpenAI embedding model name
+            embedding_model: Sentence transformer model name
             chunk_size: Size of text chunks
             chunk_overlap: Overlap between chunks
             vector_db_path: Path to store vector database
         """
-        self.embedding_model = embedding_model
+        self.embedding_model_name = embedding_model
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.vector_db_path = vector_db_path
 
-        # Initialize embeddings
-        self.embeddings = OpenAIEmbeddings(model=embedding_model)
-
-        # Initialize text splitter
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", " ", ""]
+        print(f"Loading embedding model: {embedding_model}")
+        # Initialize sentence transformer
+        # Use trust_remote_code for nomic models
+        self.embedding_model = SentenceTransformer(
+            embedding_model,
+            trust_remote_code=True
         )
+        print(f"Model loaded! Embedding dimension: {self.embedding_model.get_sentence_embedding_dimension()}")
 
     def create_chunks(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -60,8 +60,8 @@ class ChefVectorizer:
             content = doc['content']
             metadata = doc['metadata']
 
-            # Split text into chunks
-            text_chunks = self.text_splitter.split_text(content)
+            # Simple text splitter
+            text_chunks = self._split_text(content)
 
             # Add metadata to each chunk
             for i, chunk in enumerate(text_chunks):
@@ -77,71 +77,140 @@ class ChefVectorizer:
         print(f"Created {len(chunks)} chunks")
         return chunks
 
-    def create_vector_store(self, chunks: List[Dict[str, Any]]) -> Chroma:
+    def _split_text(self, text: str) -> List[str]:
+        """
+        Split text into chunks.
+
+        Args:
+            text: Text to split
+
+        Returns:
+            List of text chunks
+        """
+        # Split by paragraphs first
+        paragraphs = text.split('\n\n')
+
+        chunks = []
+        current_chunk = ""
+
+        for para in paragraphs:
+            if len(current_chunk) + len(para) <= self.chunk_size:
+                current_chunk += para + "\n\n"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = para + "\n\n"
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        return chunks
+
+    def create_vector_store(self, chunks: List[Dict[str, Any]], collection_name: str = "chef_transcripts") -> chromadb.Collection:
         """
         Create vector store from chunks.
 
         Args:
             chunks: List of text chunks with metadata
+            collection_name: Name of ChromaDB collection
 
         Returns:
-            Chroma vector store
+            ChromaDB collection
         """
         print(f"Creating vector store with {len(chunks)} chunks...")
 
-        # Prepare texts and metadatas
-        texts = [chunk['content'] for chunk in chunks]
-        metadatas = [chunk['metadata'] for chunk in chunks]
+        # Initialize ChromaDB client
+        client = chromadb.PersistentClient(path=self.vector_db_path)
 
-        # Create vector store
-        vector_store = Chroma.from_texts(
-            texts=texts,
-            embedding=self.embeddings,
-            metadatas=metadatas,
-            persist_directory=self.vector_db_path
+        # Delete collection if it exists
+        try:
+            client.delete_collection(name=collection_name)
+            print(f"Deleted existing collection: {collection_name}")
+        except:
+            pass
+
+        # Create collection
+        collection = client.create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"}
         )
 
-        print(f"Vector store created at {self.vector_db_path}")
-        return vector_store
+        # Prepare data
+        texts = [chunk['content'] for chunk in chunks]
+        metadatas = [chunk['metadata'] for chunk in chunks]
+        ids = [f"chunk_{i}" for i in range(len(chunks))]
 
-    def load_vector_store(self) -> Chroma:
+        # Generate embeddings
+        print("Generating embeddings...")
+        embeddings = self.embedding_model.encode(
+            texts,
+            show_progress_bar=True,
+            convert_to_numpy=True
+        )
+
+        # Add to collection in batches
+        batch_size = 500
+        for i in tqdm(range(0, len(chunks), batch_size), desc="Adding to vector store"):
+            batch_end = min(i + batch_size, len(chunks))
+
+            collection.add(
+                embeddings=embeddings[i:batch_end].tolist(),
+                documents=texts[i:batch_end],
+                metadatas=metadatas[i:batch_end],
+                ids=ids[i:batch_end]
+            )
+
+        print(f"Vector store created at {self.vector_db_path}")
+        return collection
+
+    def load_vector_store(self, collection_name: str = "chef_transcripts") -> chromadb.Collection:
         """
         Load existing vector store.
 
+        Args:
+            collection_name: Name of ChromaDB collection
+
         Returns:
-            Chroma vector store
+            ChromaDB collection
         """
         if not os.path.exists(self.vector_db_path):
             raise ValueError(f"Vector store not found at {self.vector_db_path}")
 
-        vector_store = Chroma(
-            persist_directory=self.vector_db_path,
-            embedding_function=self.embeddings
-        )
+        client = chromadb.PersistentClient(path=self.vector_db_path)
+        collection = client.get_collection(name=collection_name)
 
         print(f"Loaded vector store from {self.vector_db_path}")
-        return vector_store
+        print(f"Collection has {collection.count()} items")
+        return collection
 
-    def search(self, vector_store: Chroma, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, collection: chromadb.Collection, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
         Search vector store for relevant chunks.
 
         Args:
-            vector_store: Chroma vector store
+            collection: ChromaDB collection
             query: Search query
             top_k: Number of results to return
 
         Returns:
             List of relevant chunks with scores
         """
-        results = vector_store.similarity_search_with_score(query, k=top_k)
+        # Generate query embedding
+        query_embedding = self.embedding_model.encode(query, convert_to_numpy=True)
 
+        # Search
+        results = collection.query(
+            query_embeddings=[query_embedding.tolist()],
+            n_results=top_k
+        )
+
+        # Format results
         formatted_results = []
-        for doc, score in results:
+        for i in range(len(results['ids'][0])):
             formatted_results.append({
-                'content': doc.page_content,
-                'metadata': doc.metadata,
-                'score': float(score)
+                'content': results['documents'][0][i],
+                'metadata': results['metadatas'][0][i],
+                'score': 1 - results['distances'][0][i]  # Convert distance to similarity
             })
 
         return formatted_results

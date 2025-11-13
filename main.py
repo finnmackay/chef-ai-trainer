@@ -113,7 +113,10 @@ def embed():
     chunks = vectorizer.create_chunks(documents)
 
     # Create vector store
-    vector_store = vectorizer.create_vector_store(chunks)
+    collection = vectorizer.create_vector_store(
+        chunks,
+        collection_name=config['vector_db']['collection_name']
+    )
 
     console.print(f"\n[green]✓ Created vector store with {len(chunks)} chunks[/green]\n")
 
@@ -132,11 +135,15 @@ def query(question, verbose):
     )
 
     # Load vector store
-    vector_store = vectorizer.load_vector_store()
+    collection = vectorizer.load_vector_store(
+        collection_name=config['vector_db']['collection_name']
+    )
 
     # Create assistant
     assistant = ChefAssistant(
-        vector_store=vector_store,
+        collection=collection,
+        vectorizer=vectorizer,
+        provider=config['llm']['provider'],
         model=config['llm']['model'],
         temperature=config['llm']['temperature'],
         max_tokens=config['llm']['max_tokens'],
@@ -173,7 +180,9 @@ def interactive():
 
     # Load vector store
     try:
-        vector_store = vectorizer.load_vector_store()
+        collection = vectorizer.load_vector_store(
+            collection_name=config['vector_db']['collection_name']
+        )
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         console.print("[yellow]Run 'python main.py embed' first to create the vector database.[/yellow]")
@@ -181,7 +190,9 @@ def interactive():
 
     # Create assistant
     assistant = ChefAssistant(
-        vector_store=vector_store,
+        collection=collection,
+        vectorizer=vectorizer,
+        provider=config['llm']['provider'],
         model=config['llm']['model'],
         temperature=config['llm']['temperature'],
         max_tokens=config['llm']['max_tokens'],
@@ -216,11 +227,21 @@ def status():
     else:
         table.add_row("Vector Database", "✗ Not Created", "Run 'python main.py embed'")
 
-    # Check API keys
-    if os.getenv('OPENAI_API_KEY'):
-        table.add_row("OpenAI API Key", "✓ Configured", "")
+    # Check LLM provider
+    provider = config['llm']['provider']
+    if provider == "ollama":
+        table.add_row("LLM Provider", "Ollama (Local)", f"Model: {config['llm']['model']}")
+        table.add_row("API Keys", "Not Required", "Using local models")
     else:
-        table.add_row("OpenAI API Key", "✗ Missing", "Set in .env file")
+        if os.getenv('OPENAI_API_KEY'):
+            table.add_row("LLM Provider", "OpenAI (API)", f"Model: {config['llm']['model']}")
+            table.add_row("OpenAI API Key", "✓ Configured", "")
+        else:
+            table.add_row("LLM Provider", "OpenAI (API)", f"Model: {config['llm']['model']}")
+            table.add_row("OpenAI API Key", "✗ Missing", "Set in .env file")
+
+    # Check embedding model
+    table.add_row("Embedding Model", "Sentence Transformers", config['embedding']['model'])
 
     console.print("\n")
     console.print(table)
