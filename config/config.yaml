@@ -1,0 +1,77 @@
+# Chef AI Trainer Configuration
+
+# Obsidian Vault Settings
+obsidian:
+  vault_path: "${OBSIDIAN_VAULT_PATH}"
+  # Folders within vault containing chef transcripts
+  folders:
+    - "youtube_recipes/fallow"
+    - "youtube_recipes/chef_steps"
+  # File patterns to include
+  file_patterns:
+    - "*.md"
+
+# Embedding Configuration
+embedding:
+  model: "${EMBEDDING_MODEL}"
+  chunk_size: ${CHUNK_SIZE}
+  chunk_overlap: ${CHUNK_OVERLAP}
+  # Metadata to extract from frontmatter
+  metadata_fields:
+    - "chef"
+    - "channel"
+    - "video_title"
+    - "video_url"
+    - "published_date"
+    - "tags"
+
+# Vector Database
+vector_db:
+  type: "chromadb"  # Options: chromadb, faiss
+  path: "${VECTOR_DB_PATH}"
+  collection_name: "chef_transcripts"
+  distance_metric: "cosine"
+
+# LLM Configuration
+llm:
+  provider: "openai"  # Options: openai, anthropic
+  model: "${LLM_MODEL}"
+  temperature: ${TEMPERATURE}
+  max_tokens: ${MAX_TOKENS}
+
+# RAG Settings
+rag:
+  retrieval:
+    top_k: 5  # Number of relevant chunks to retrieve
+    score_threshold: 0.7  # Minimum similarity score
+  context:
+    max_context_length: 4000  # Maximum tokens for context
+
+# Query Settings
+query:
+  system_prompt: |
+    You are a professional chef AI assistant trained on techniques from world-class chefs.
+    Answer cooking questions based ONLY on the provided context from chef transcripts.
+    If you don't have enough information, say so clearly.
+    Always cite which chef or channel the information comes from.
+
+  user_prompt_template: |
+    Based on the chef transcripts below, answer this cooking question:
+
+    Question: {question}
+
+    Context from chef transcripts:
+    {context}
+
+    Provide a detailed answer, citing which chef or channel each technique comes from.
+
+# Chef Sources (for attribution)
+sources:
+  fallow:
+    name: "Fallow"
+    type: "Restaurant"
+    description: "Fine dining restaurant known for sustainability and modern British cuisine"
+  chef_steps:
+    name: "ChefSteps"
+    type: "YouTube Channel"
+    description: "Precision cooking and modernist cuisine techniques"
