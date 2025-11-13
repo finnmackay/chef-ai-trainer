@@ -52,12 +52,22 @@ chef-ai-trainer/
 
 ### 1. Prerequisites
 
-```bash
-# Install Ollama (for local LLM)
-# macOS/Linux:
-curl https://ollama.ai/install.sh | sh
+**Install Ollama (for local LLM):**
 
-# Pull a model
+**macOS:**
+```bash
+# Option 1: Download app from https://ollama.com/download/mac
+# Option 2: Use Homebrew
+brew install ollama
+```
+
+**Linux:**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+**Then pull a model:**
+```bash
 ollama pull llama3.2
 ```
 
@@ -219,8 +229,11 @@ On M1 MacBook Pro:
 
 **"Ollama not found"**
 ```bash
-# Install Ollama
-curl https://ollama.ai/install.sh | sh
+# macOS: Download from https://ollama.com/download/mac
+# Or use Homebrew: brew install ollama
+# Linux: curl -fsSL https://ollama.com/install.sh | sh
+
+# Then pull a model
 ollama pull llama3.2
 ```
 
